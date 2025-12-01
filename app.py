@@ -122,7 +122,7 @@ with tab2:
 
     st.write("Cette section génère une analyse stratégique complète à partir des posts collectés.")
 
-    if st.button("🧠 Générer la newsletter"):
+    if st.button(" Générer la newsletter"):
         with st.spinner("Analyse des posts et génération de la newsletter..."):
 
             posts = fetch_posts()
