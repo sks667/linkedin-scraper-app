@@ -91,26 +91,26 @@ with tab1:
         else:
             st.success(f"{len(posts)} posts trouvés ✔️")
 
-            # Affichage par entreprise avec panneaux déroulants (expanders)
-companies = {}
-for p in posts:
-    companies.setdefault(p["company"], []).append(p)
+            # Affichage par entreprise
+            companies = {}
+            for p in posts:
+                companies.setdefault(p["company"], []).append(p)
 
-for company, items in companies.items():
-    with st.expander(f"🏢 {company} — {len(items)} posts", expanded=False):
+            for company, items in companies.items():
+                st.subheader(f"🏢 {company}")
 
-        for item in items:
-            title, summary = smart_title_and_summary(item['text'])
+                for item in items:
+                    title, summary = smart_title_and_summary(item['text'])
 
-            with st.container(border=True):
-                st.markdown(f"### {title}")
-                st.write(summary)
+                    with st.container(border=True):
+                        st.markdown(f"### {title}")
+                        st.write(summary)
 
-                if item["image"]:
-                    st.image(item["image"], use_column_width=True)
+                        if item["image"]:
+                            st.image(item["image"], use_column_width=True)
 
-                st.markdown(f"[🔗 Voir le post LinkedIn]({item['link']})")
-                st.write("---")
+                        st.markdown(f"[🔗 Voir le post LinkedIn]({item['link']})")
+                        st.write("---")
 
     st.info("Clique sur le bouton pour afficher les posts.")
 
