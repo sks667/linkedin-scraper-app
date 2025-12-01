@@ -2,45 +2,12 @@ import streamlit as st
 import requests
 from datetime import datetime, timedelta
 from openai import OpenAI
-import os
-
+import os   
 # -------- CONFIG --------
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_KEY = os.getenv("OPENAI_API_KEY") 
 DATASET_URL = "https://api.apify.com/v2/actor-tasks/purple_neck~linkedin-company-posts-batch-scraper-no-cookies-task/runs/last/dataset/items?token=apify_api_ioAvdVWOS4CFKd3LQAsYrTtSKlgCyW2vCc4v"
 WINDOW_HOURS = 200
-APP_PASSWORD = os.getenv("APP_PASSWORD")
 client = OpenAI(api_key=OPENAI_KEY)
-
-# -------- SECURITÉ : MOT DE PASSE --------
-
-def check_password():
-    def password_entered():
-        if st.session_state["password"] == APP_PASSWORD:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]
-        else:
-            st.session_state["password_correct"] = False
-
-    if "password_correct" in st.session_state:
-        return st.session_state["password_correct"]
-
-    st.title("🔐 Accès protégé")
-    st.write("Veuillez entrer le mot de passe pour accéder au tableau de bord.")
-    st.text_input("Mot de passe :", type="password", key="password", on_change=password_entered)
-
-    if "password_correct" in st.session_state and not st.session_state["password_correct"]:
-        st.error("⛔ Mot de passe incorrect")
-    return False
-
-
-if not check_password():
-    st.stop()
-
-
-# -------- STOCKAGE DES POSTS SUPPRIMÉS --------
-if "deleted_posts" not in st.session_state:
-    st.session_state["deleted_posts"] = set()   # stocke des URLs → unique et fiable
-
 
 # --------- FONCTIONS ---------
 
@@ -91,17 +58,11 @@ def fetch_posts():
         if dt < cutoff:
             continue
 
-        post_url = p.get("post_url")
-
-        # Filtre : si post supprimé → on ignore
-        if post_url in st.session_state["deleted_posts"]:
-            continue
-
         posts.append({
             "company": p.get("author", {}).get("name", "Entreprise inconnue"),
             "text": p.get("text") or "",
             "image": p.get("image_url") or None,
-            "link": post_url,
+            "link": p.get("post_url"),
         })
 
     return posts
@@ -117,12 +78,12 @@ st.write("Bienvenue mes Cannois!")
 tab1, tab2 = st.tabs(["📌 Scraper & Résumés", "📰 Newsletter"])
 
 
-# -------- TAB 1 : SCRAPER & POSTS --------
+# ----------- TAB 1 : SCRAPER & POSTS -----------
 with tab1:
     st.header("📌 Récupérer les posts")
 
     if st.button("🔄 Lancer la collecte"):
-        with st.spinner("Récupération des posts…"):
+        with st.spinner("Récupération des posts..."):
             posts = fetch_posts()
 
         if not posts:
@@ -130,6 +91,7 @@ with tab1:
         else:
             st.success(f"{len(posts)} posts trouvés ✔️")
 
+            # Affichage par entreprise
             companies = {}
             for p in posts:
                 companies.setdefault(p["company"], []).append(p)
@@ -148,33 +110,33 @@ with tab1:
                             st.image(item["image"], use_column_width=True)
 
                         st.markdown(f"[🔗 Voir le post LinkedIn]({item['link']})")
-
-                        # --- BOUTON SUPPRESSION ---
-                        if st.button("🗑️ Supprimer ce post", key=item["link"]):
-                            st.session_state["deleted_posts"].add(item["link"])
-                            st.experimental_rerun()
-
                         st.write("---")
 
     st.info("Clique sur le bouton pour afficher les posts.")
 
+    
 
-# -------- TAB 2 : NEWSLETTER --------
+
+# ----------- TAB 2 : NEWSLETTER -----------
+
 with tab2:
     st.header("📰 Génération de newsletter")
+
     st.write("Cette section génère une analyse stratégique complète à partir des posts collectés.")
 
-    if st.button(" Générer la newsletter"):
+    if st.button("Générer la newsletter"):
         with st.spinner("Analyse des posts et génération de la newsletter..."):
 
             posts = fetch_posts()
             if not posts:
                 st.error("Aucun post disponible pour créer la newsletter.")
             else:
+                # Organiser les posts par entreprise
                 companies = {}
                 for p in posts:
                     companies.setdefault(p["company"], []).append(p)
 
+                # Construire un contexte clair pour GPT
                 context = ""
                 for company, items in companies.items():
                     context += f"\n\n### {company}\n"
@@ -182,9 +144,10 @@ with tab2:
                         title, summary = smart_title_and_summary(item['text'])
                         context += f"- **{title}** : {summary}\n"
 
+                # Prompt newsletter
                 prompt = f"""
 Tu es un analyste stratégique spécialisé dans le secteur spatial européen.
-Génère une **newsletter professionnelle**, concise mais percutante, basée sur ces posts LinkedIn récents :
+Génère une **newsletter professionnelle**, concise mais percutante, basée sur ces posts LinkedIn des dernières heures :
 
 {context}
 
@@ -196,6 +159,7 @@ Ton travail :
    - les tendances majeures,
    - les messages politiques ou institutionnels,
    - les implications marché & concurrents.
+4. Proposer une section "À surveiller prochainement".
 5. Faire une conclusion éditoriale courte.
 
 Format EXACT :
@@ -216,6 +180,7 @@ Format EXACT :
 <texte>
 """
 
+                # Appel GPT
                 newsletter = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": prompt}],
@@ -224,6 +189,7 @@ Format EXACT :
                 st.success("Newsletter générée ✔️")
                 st.markdown(newsletter)
 
+                # Téléchargement
                 st.download_button(
                     label="📥 Télécharger en .txt",
                     data=newsletter,
