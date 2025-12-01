@@ -6,38 +6,30 @@ import os
 
 # -------- CONFIG --------
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-DATASET_URL = "https://api.apify.com/v2/actor-tasks/purple_neck~linkedin-company-posts-batch-scraper-no-cookies-task/runs/last/dataset/items?token=apify_api_ioAvdVWOS4CFKd3LQAsYrTtSKlgCyW2vCc4v"
+DATASET_URL = "https://api.apify.com/v2/actor-tasks/purple_neck~linkedin-company-posts-batch-scraper-no-cookies-task/runs/last/dataset/items?format=json&clean=true&token=apify_api_ioAvdVWOS4CFKd3LQAsYrTtSKlgCyW2vCc4v"
 WINDOW_HOURS = 200
-APP_PASSWORD = os.getenv("APP_PASSWORD")  # Mot de passe dans secrets
+APP_PASSWORD = os.getenv("APP_PASSWORD")
 client = OpenAI(api_key=OPENAI_KEY)
+
 
 # -------- SECURITÉ : MOT DE PASSE --------
 
 def check_password():
-    """Affiche un formulaire de mot de passe Streamlit.
-       Retourne True si le mot de passe est correct."""
-    
+
     def password_entered():
         if st.session_state["password"] == APP_PASSWORD:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # sécurité
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
-    # Si déjà authentifié
     if "password_correct" in st.session_state:
         return st.session_state["password_correct"]
 
-    # Formulaire d’entrée
     st.title("🔐 Accès protégé")
     st.write("Veuillez entrer le mot de passe pour accéder au tableau de bord.")
 
-    st.text_input(
-        "Mot de passe :",
-        type="password",
-        key="password",
-        on_change=password_entered
-    )
+    st.text_input("Mot de passe :", type="password", key="password", on_change=password_entered)
 
     if "password_correct" in st.session_state and not st.session_state["password_correct"]:
         st.error("⛔ Mot de passe incorrect")
@@ -45,7 +37,6 @@ def check_password():
     return False
 
 
-# Si le mot de passe n’est pas correct → on s’arrête ici
 if not check_password():
     st.stop()
 
@@ -59,7 +50,7 @@ Voici un texte provenant d'un post LinkedIn :
 {text}
 
 Ta mission :
-1) Générer un titre clair et court (6 à 12 mots), style communiqué officiel.
+1) Générer un titre clair et court (6 à 12 mots).
 2) Générer un résumé en UNE SEULE PHRASE.
 
 Format EXACT :
@@ -73,14 +64,15 @@ RESUME: <résumé>
     ).choices[0].message.content
 
     title = ""
-    resume = ""
-    for l in res.split("\n"):
-        if l.startswith("TITRE:"):
-            title = l.replace("TITRE:", "").strip()
-        if l.startswith("RESUME:"):
-            resume = l.replace("RESUME:", "").strip()
+    summary = ""
 
-    return title, resume
+    for line in res.split("\n"):
+        if line.startswith("TITRE:"):
+            title = line.replace("TITRE:", "").strip()
+        if line.startswith("RESUME:"):
+            summary = line.replace("RESUME:", "").strip()
+
+    return title, summary
 
 
 def fetch_posts():
@@ -100,9 +92,10 @@ def fetch_posts():
             continue
 
         posts.append({
+            "id": p.get("full_urn"),
             "company": p.get("author", {}).get("name", "Entreprise inconnue"),
             "text": p.get("text") or "",
-            "image": p.get("image_url") or None,
+            "image": p.get("media", {}).get("items", [{}])[0].get("thumbnail"),
             "link": p.get("post_url"),
         })
 
@@ -114,16 +107,20 @@ def fetch_posts():
 st.set_page_config(page_title="Scraper LinkedIn", layout="wide")
 
 st.title("🚀 Tableau de bord LinkedIn")
-st.write("Bienvenue mes Cannois!")
+
+if "active_posts" not in st.session_state:
+    st.session_state["active_posts"] = {}
+
 
 tab1, tab2 = st.tabs(["📌 Scraper & Résumés", "📰 Newsletter"])
 
 
 # -------- TAB 1 : SCRAPER & POSTS --------
 with tab1:
-    st.header("📌 Récupérer les posts")
-    if st.button("🔄 Lancer la collecte"):
-        with st.spinner("Récupération des posts…"):
+
+    st.header("📌 Posts LinkedIn (filtrés sur 24h – 200h)")
+    if st.button("🔄 Récupérer les posts"):
+        with st.spinner("Récupération des posts..."):
             posts = fetch_posts()
 
         if not posts:
@@ -135,96 +132,92 @@ with tab1:
             for p in posts:
                 companies.setdefault(p["company"], []).append(p)
 
-            for company, items in companies.items():
-                st.subheader(f"🏢 {company}")
+            # Mémoriser les posts
+            st.session_state["active_posts"] = {p["id"]: True for p in posts}
+            st.session_state["posts_data"] = posts
 
-                for item in items:
-                    title, summary = smart_title_and_summary(item['text'])
+    if "posts_data" not in st.session_state:
+        st.info("Clique sur le bouton pour afficher les posts.")
+    else:
+        posts = st.session_state["posts_data"]
 
-                    with st.container(border=True):
-                        st.markdown(f"### {title}")
-                        st.write(summary)
+        companies = {}
+        for p in posts:
+            companies.setdefault(p["company"], []).append(p)
 
-                        if item["image"]:
-                            st.image(item["image"], use_column_width=True)
+        for company, items in companies.items():
+            st.subheader(f"🏢 {company}")
 
-                        st.markdown(f"[🔗 Voir le post LinkedIn]({item['link']})")
-                        st.write("---")
+            for item in items:
+                include_key = f"include_{item['id']}"
 
-    st.info("Clique sur le bouton pour afficher les posts.")
+                if include_key not in st.session_state:
+                    st.session_state[include_key] = True  # Par défaut : inclus
+
+                with st.container(border=True):
+                    st.checkbox("Inclure ce post", key=include_key)
+
+                    title, summary = smart_title_and_summary(item["text"])
+
+                    st.markdown(f"### {title}")
+                    st.write(summary)
+
+                    if item["image"]:
+                        st.image(item["image"], use_column_width=True)
+
+                    st.markdown(f"[🔗 Voir le post]({item['link']})")
+                    st.write("---")
 
 
 # -------- TAB 2 : NEWSLETTER --------
-
 with tab2:
     st.header("📰 Génération de newsletter")
 
-    st.write("Cette section génère une analyse stratégique complète à partir des posts collectés.")
-
     if st.button(" Générer la newsletter"):
-        with st.spinner("Analyse des posts et génération de la newsletter..."):
+        if "posts_data" not in st.session_state:
+            st.error("Aucun post disponible.")
+            st.stop()
 
-            posts = fetch_posts()
-            if not posts:
-                st.error("Aucun post disponible pour créer la newsletter.")
-            else:
-                companies = {}
-                for p in posts:
-                    companies.setdefault(p["company"], []).append(p)
+        posts = [p for p in st.session_state["posts_data"]
+                 if st.session_state.get(f"include_{p['id']}", True)]
 
-                context = ""
-                for company, items in companies.items():
-                    context += f"\n\n### {company}\n"
-                    for item in items:
-                        title, summary = smart_title_and_summary(item['text'])
-                        context += f"- **{title}** : {summary}\n"
+        if not posts:
+            st.error("Aucun post sélectionné !")
+            st.stop()
 
-                prompt = f"""
+        companies = {}
+        for p in posts:
+            companies.setdefault(p["company"], []).append(p)
+
+        context = ""
+        for company, items in companies.items():
+            context += f"\n\n### {company}\n"
+            for item in items:
+                title, summary = smart_title_and_summary(item["text"])
+                context += f"- **{title}** : {summary}\n"
+
+        prompt = f"""
 Tu es un analyste stratégique spécialisé dans le secteur spatial européen.
-Génère une **newsletter professionnelle**, concise mais percutante, basée sur ces posts LinkedIn récents :
+Génère une newsletter professionnelle basée uniquement sur ces posts :
 
 {context}
 
-Ton travail :
-1. Créer un titre général impactant pour la newsletter.
-2. Faire une synthèse stratégique globale (400–600 mots).
-3. Identifier :
-   - les signaux faibles,
-   - les tendances majeures,
-   - les messages politiques ou institutionnels,
-   - les implications marché & concurrents.
-4. Proposer une section "À surveiller prochainement".
-5. Faire une conclusion éditoriale courte.
-
-Format EXACT :
+Format :
 # <Titre>
 ## Synthèse stratégique
-<texte>
-## Signaux faibles
-- ...
-## Tendances
-- ...
-## Messages institutionnels
-- ...
-## Implications marché & concurrence
-- ...
-## À surveiller
-- ...
-## Conclusion
-<texte>
+...
 """
 
-                newsletter = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": prompt}],
-                ).choices[0].message.content
+        newsletter = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+        ).choices[0].message.content
 
-                st.success("Newsletter générée ✔️")
-                st.markdown(newsletter)
+        st.markdown(newsletter)
 
-                st.download_button(
-                    label="📥 Télécharger en .txt",
-                    data=newsletter,
-                    file_name="newsletter.txt",
-                    mime="text/plain"
-                )
+        st.download_button(
+            "📥 Télécharger la newsletter",
+            newsletter,
+            "newsletter.txt",
+            "text/plain"
+        )
